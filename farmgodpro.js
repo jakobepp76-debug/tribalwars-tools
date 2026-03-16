@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         FarmGod DE PRO V5.2 MOBILE HELPER
+// @name         FarmGod DE PRO V5.2.2 MOBILE HELPER
 // @namespace    https://example.com/
-// @version      5.2.1
+// @version      5.2.2
 // @description  FarmGod Pro mit 2 Zeitwellen, A/B-Logik, Status-Spalten, Blacklist-Manager, Sitzungs-Check und mobilem Auto-Helper
 // @author       angepasst
 // @match        *://*.die-staemme.de/*
@@ -14,7 +14,7 @@
   'use strict';
 
   const FG = {
-    name: 'FarmGod DE PRO V5.2 MOBILE HELPER',
+    name: 'FarmGod DE PRO V5.2.2 MOBILE HELPER',
     debug: true,
     onlyScreen: 'am_farm',
     waitMs: 300,
@@ -35,11 +35,11 @@
     manualBlockedTargetIds: [],
 
     storage: {
-      options: 'fg_pro_v52_options',
-      unitSpeeds: 'fg_pro_v52_unit_speeds',
-      helperEnabled: 'fg_pro_v52_helper_enabled',
-      blockedCoords: 'fg_pro_v52_blocked_coords',
-      blockedTargetIds: 'fg_pro_v52_blocked_target_ids'
+      options: 'fg_pro_v522_options',
+      unitSpeeds: 'fg_pro_v522_unit_speeds',
+      helperEnabled: 'fg_pro_v522_helper_enabled',
+      blockedCoords: 'fg_pro_v522_blocked_coords',
+      blockedTargetIds: 'fg_pro_v522_blocked_target_ids'
     }
   };
 
@@ -73,6 +73,11 @@
       return parseFloat(value) || 0;
     },
 
+    toInt(value, fallback = 0) {
+      const n = parseInt(value, 10);
+      return Number.isFinite(n) ? n : fallback;
+    },
+
     extractCoord(text) {
       const matches = String(text || '').match(/\d{1,3}\|\d{1,3}/g);
       return matches ? matches[matches.length - 1] : null;
@@ -86,8 +91,8 @@
     },
 
     distance(a, b) {
-      const ca = Util.coordToObject(a);
-      const cb = Util.coordToObject(b);
+      const ca = typeof a === 'string' ? Util.coordToObject(a) : a;
+      const cb = typeof b === 'string' ? Util.coordToObject(b) : b;
       if (!ca || !cb) return Infinity;
       return Math.hypot(ca.x - cb.x, ca.y - cb.y);
     },
@@ -105,6 +110,12 @@
     },
 
     getServerTimestamp() {
+      try {
+        if (window.Timing && typeof window.Timing.getCurrentServerTime === 'function') {
+          return window.Timing.getCurrentServerTime();
+        }
+      } catch {}
+
       const match = window.$('#serverTime').closest('p').text().match(/\d+/g);
       if (!match || match.length < 6) return Date.now();
       const [hour, min, sec, day, month, year] = match;
@@ -265,7 +276,7 @@
       missingFeatures: 'Das Script benötigt Premium und den Farm-Assistenten!',
       optionsTitle: 'FarmGod Pro Optionen',
       optionsHint:
-        '<b>Pro-Logik:</b><br>- Volle Beute = kurzer Abstand<br>- Nicht volle / unbekannte Beute = langer Abstand<br>- Gelb/Teilverluste = immer Vorlage B<br>- Sonst immer Vorlage A<br>- Wenn die gewählte Vorlage nicht möglich ist, wird übersprungen',
+        '<b>Pro-Logik:</b><br>- Volle Beute = kurzer Abstand<br>- Nicht volle / unbekannte Beute = langer Abstand<br>- Gelb/Teilverluste = immer Vorlage B<br>- Sonst immer Vorlage A<br>- Mobiler Auto-Helper klickt direkt auf Farm-Buttons',
       group: 'Aus welcher Gruppe soll gefarmt werden:',
       distance: 'Maximale Laufdistanz in Feldern:',
       timeFull: 'Zeitabstand bei voller Beute (Minuten):',
@@ -399,12 +410,13 @@
       };
 
       const villagesProcessor = ($html) => {
-        $html.find('#combined_table').find('.row_a, .row_b')
+        $html.find('#combined_table').find('.row_a, .row_b, .row_ax, .row_bx')
           .filter((i, el) => window.$(el).find('.bonus_icon_33').length === 0)
           .each((i, el) => {
             const $el = window.$(el);
             const $label = $el.find('.quickedit-label').first();
-            const coord = Util.extractCoord($label.text());
+            const coord = Util.normalizeCoord(Util.extractCoord($label.text()));
+            if (!coord) return;
 
             const rawUnits = {};
             $el.find('.unit-item').each((index, element) => {
@@ -414,20 +426,20 @@
 
             const normalizedUnits = allowedUnits.map((unitName) => rawUnits[unitName] || 0);
 
-            if (coord) {
-              data.villages[coord] = {
-                name: $label.data('text') || $label.text(),
-                id: parseInt($el.find('.quickedit-vn').first().data('id'), 10),
-                units: normalizedUnits
-              };
-            }
+            data.villages[coord] = {
+              name: $label.data('text') || $label.text(),
+              id: parseInt($el.find('.quickedit-vn').first().data('id'), 10),
+              units: normalizedUnits
+            };
           });
       };
 
       const commandsProcessor = ($html) => {
         $html.find('#commands_table').find('.row_a, .row_ax, .row_b, .row_bx').each((i, el) => {
           const $el = window.$(el);
-          const coord = Util.normalizeCoord(Util.extractCoord($el.find('.quickedit-label').first().text()));
+          const coord = Util.normalizeCoord(
+            Util.extractCoord($el.find('.quickedit-label').first().text())
+          );
           if (!coord) return;
           if (!data.commands[coord]) data.commands[coord] = [];
           data.commands[coord].push(
@@ -458,6 +470,7 @@
 
               const normalizedUnits = allowedUnits.map((unitName) => templateInputs[unitName] || 0);
               let speed = 0;
+
               allowedUnits.forEach((unitName) => {
                 if ((templateInputs[unitName] || 0) > 0) {
                   speed = Math.max(speed, data.unitSpeeds[unitName] || 0);
@@ -485,7 +498,8 @@
           const colorMatch = ($el.find('img[src*="graphic/dots/"]').attr('src') || '')
             .match(/dots\/(green|yellow|red|blue|red_blue)/);
 
-          const hasFortressIcon = $el.find('.bonus_icon_33, img[src*="bonus_33"], img[src*="bonus_icon_33"]').length > 0;
+          const hasFortressIcon =
+            $el.find('.bonus_icon_33, img[src*="bonus_33"], img[src*="bonus_icon_33"]').length > 0;
           if (hasFortressIcon) data.fortressCoords.add(coord);
 
           data.farmMeta[coord] = {
@@ -528,7 +542,9 @@
             }
 
             if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(type)) return;
-            if (type === FG.fortressBonusType) data.fortressCoords.add(Util.normalizeCoord(`${x}|${y}`));
+            if (type === FG.fortressBonusType) {
+              data.fortressCoords.add(Util.normalizeCoord(`${x}|${y}`));
+            }
           });
         } catch (e) {
           Log.warn('bonus.txt konnte nicht geladen oder gelesen werden:', e);
@@ -574,6 +590,11 @@
           return true;
         })
       );
+
+      Log.info('villages:', Object.keys(data.villages).length);
+      Log.info('templates:', data.templates);
+      Log.info('farmMeta:', Object.keys(data.farmMeta).length);
+      Log.info('mapBarbs:', Object.keys(data.mapBarbs).length);
 
       return data;
     }
@@ -642,11 +663,11 @@
 
             const coord = Util.normalizeCoord(barb.coord);
             const farmMeta = data.farmMeta[coord] || { id: barb.id };
-            const targetId = farmMeta?.id ? String(farmMeta.id) : String(barb.id);
+            const targetId = farmMeta?.id ? farmMeta.id : barb.id;
 
             if (data.fortressCoords.has(coord)) continue;
             if (data.blockedCoords.has(coord)) continue;
-            if (data.blockedTargetIds.has(targetId)) continue;
+            if (data.blockedTargetIds.has(String(targetId))) continue;
             if (farmMeta.fortress) continue;
 
             const chosen = this.chooseTemplateForTarget(data, farmMeta, village.units);
@@ -683,7 +704,7 @@
               },
               target: {
                 coord,
-                id: barb.id
+                id: targetId
               },
               fields: barb.distance,
               template: {
@@ -708,6 +729,7 @@
         }
       }
 
+      Log.info('geplante Farmen:', plan.counter);
       return plan;
     }
   };
@@ -807,7 +829,9 @@
     },
 
     showLoading() {
-      window.$('.fg-options-content').html(window.UI.Throbber[0].outerHTML + '<br><br>' + I18N.de.loading);
+      window.$('.fg-options-content').html(
+        window.UI.Throbber[0].outerHTML + '<br><br>' + I18N.de.loading
+      );
     },
 
     removeBlockedRowsFromDom() {
@@ -837,6 +861,7 @@
       const count = document.querySelectorAll('.farmRow').length;
       window.UI.updateProgressBar(window.$(`#${FG.progressBarId}`), 0, count);
       window.$(`#${FG.progressBarId}`).data('current', 0).data('max', count);
+      this.refreshBlacklistInfo();
     },
 
     helperPanelHtml() {
@@ -882,7 +907,12 @@
     refreshBlacklistInfo() {
       const el = document.querySelector('#fg-blacklist-info');
       if (!el) return;
-      el.textContent = `Blacklist: ${Util.getBlockedCoords().size} Koordinaten, ${Util.getBlockedTargetIds().size} Ziel-IDs`;
+
+      const rowCount = document.querySelectorAll('.farmRow').length;
+      el.textContent =
+        `Blacklist: ${Util.getBlockedCoords().size} Koordinaten, ` +
+        `${Util.getBlockedTargetIds().size} Ziel-IDs | ` +
+        `Geplant: ${rowCount}`;
     },
 
     showBlacklist() {
@@ -901,6 +931,7 @@
     clearBlacklistUi() {
       Util.clearBlacklist();
       this.refreshBlacklistInfo();
+      this.removeBlockedRowsFromDom();
       window.UI.SuccessMessage('Blacklist wurde geleert.');
     },
 
@@ -938,15 +969,19 @@
     farmBusy: false,
 
     sendFarm($icon) {
-      const n = window.Timing.getElapsedTimeSinceLoad();
+      const n = window.Timing && typeof window.Timing.getElapsedTimeSinceLoad === 'function'
+        ? window.Timing.getElapsedTimeSinceLoad()
+        : Date.now();
 
       if (
         this.farmBusy ||
-        (window.Accountmanager.farm.last_click && n - window.Accountmanager.farm.last_click < 200)
+        (window.Accountmanager?.farm?.last_click && n - window.Accountmanager.farm.last_click < 200)
       ) return;
 
       this.farmBusy = true;
-      window.Accountmanager.farm.last_click = n;
+      if (window.Accountmanager?.farm) {
+        window.Accountmanager.farm.last_click = n;
+      }
 
       const $pb = window.$(`#${FG.progressBarId}`);
       const targetCoord = Util.normalizeCoord($icon.data('coord'));
@@ -990,6 +1025,7 @@
           $pb.data('current', $pb.data('current') + 1);
           window.UI.updateProgressBar($pb, $pb.data('current'), $pb.data('max'));
           $icon.closest('.farmRow').remove();
+          UIBuilder.refreshBlacklistInfo();
           this.farmBusy = false;
         }
       );
@@ -1004,8 +1040,8 @@
         });
 
       window.$(document)
-        .off('keydown.fgprov52')
-        .on('keydown.fgprov52', (event) => {
+        .off('keydown.fgprov522')
+        .on('keydown.fgprov522', (event) => {
           if ((event.keyCode || event.which) === 13) {
             const first = document.querySelector('.fg-farm-icon');
             if (first) first.click();
@@ -1305,6 +1341,13 @@
       }
     }, FG.waitMs);
   }
+
+  window.FarmGodPro = {
+    open: () => App.openDialog(),
+    plan: () => App.planFromSavedOptions(),
+    start: () => Helper.start(),
+    stop: () => Helper.stop()
+  };
 
   waitForGame();
 })();
