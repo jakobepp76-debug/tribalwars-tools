@@ -1565,11 +1565,13 @@
       if (!Util.isFarmPage()) return false;
 
       if (
-        !window.game_data.features ||
-        !window.game_data.features.Premium ||
-        !window.game_data.features.FarmAssistent ||
-        !window.game_data.features.Premium.active ||
-        !window.game_data.features.FarmAssistent.active
+        window.game_data?.features &&
+        (
+          !window.game_data.features.Premium ||
+          !window.game_data.features.FarmAssistent ||
+          !window.game_data.features.Premium.active ||
+          !window.game_data.features.FarmAssistent.active
+        )
       ) {
         window.UI.ErrorMessage(I18N.de.missingFeatures);
         return false;
